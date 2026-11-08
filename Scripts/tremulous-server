@@ -1,0 +1,55 @@
+#!/bin/sh
+# Start the Tremulous dedicated server (START_EXE).
+#
+# Runs `./tremded +set dedicated <1|2> +set net_port <TREMULOUS_PORT> +set net_alt1port <..>
+# +set net_alt2port <..> +set net_alternateProtocols <3|0> +set fs_basepath <root>
+# +set fs_homepath <root> [+set fs_game <TREMULOUS_GAME>] <START_ARGS> +exec lancommander.cfg`
+# from the server root, so the game data comes from Merged/ and everything the server writes
+# (configs, logs, admin.dat) lands in Overlay/. lancommander.cfg (see the 30-ConfigureTremulous
+# hook) starts the map.
+set -e
+
+root="${SERVER_ROOT:-/config/Merged}"
+game="${TREMULOUS_GAME}"
+[ "$game" = gpp ] && game=
+
+cd "$root"
+
+if [ ! -f ./tremded ] || ! ls gpp/data-*.pk3 >/dev/null 2>&1; then
+    echo "tremded or gpp/data-*.pk3 not found in $root; set TREMULOUS_SERVER_URL or copy Tremulous into /config/Server" >&2
+    exit 1
+fi
+
+lower() { echo "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# dedicated 1 = LAN only, 2 = also announce to the internet master servers
+case "$(lower "${TREMULOUS_LAN:-true}")" in
+    false|0|no) dedicated=2 ;;
+    *) dedicated=1 ;;
+esac
+
+# net_alternateProtocols: 1 = also serve 1.2 (GPP) clients on net_alt1port, 2 = 1.1 clients on
+# net_alt2port, 3 = both (engine default), 0 = 1.3 clients only
+case "$(lower "${TREMULOUS_LEGACY_PROTOCOLS:-true}")" in
+    false|0|no) protocols=0 ;;
+    true|yes|"") protocols=3 ;;
+    *) protocols="$TREMULOUS_LEGACY_PROTOCOLS" ;;
+esac
+
+set -- ./tremded \
+    +set dedicated "$dedicated" \
+    +set net_port "${TREMULOUS_PORT:-30720}" \
+    +set net_alt1port "${TREMULOUS_ALT1_PORT:-30721}" \
+    +set net_alt2port "${TREMULOUS_ALT2_PORT:-30722}" \
+    +set net_alternateProtocols "$protocols" \
+    +set fs_basepath "$root" \
+    +set fs_homepath "$root" \
+    +set fs_game "$game" \
+    +set com_ansiColor 0 \
+    "$@" \
+    +exec lancommander.cfg
+
+echo "Starting: $*"
+
+# Line-buffer the console output so it reaches docker logs straight away
+exec stdbuf -oL -eL "$@" < /dev/null
